@@ -1,23 +1,55 @@
 import os
-
 from fastapi import FastAPI, Security, HTTPException, Depends
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import List, Dict
-
 from llm.api import call_llm_api, chat_completion
+from db import get_db
+from auth.auth import create_api_user, get_api_user, get_me, deactivate_api_user, activate_api_user, get_all_api_users
 
 app = FastAPI()
 
-API_KEY = os.getenv("API_KEY")
 API_KEY_NAME = "x-api-key"
 
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
-async def get_api_key(api_key_header: str = Security(api_key_header)):
-    if api_key_header == API_KEY:
-        return api_key_header
-    raise HTTPException(status_code=401, detail="Unauthorized")
+
+def get_api_key(api_key_header: str = Security(api_key_header)):
+    if api_key_header is None:
+        raise HTTPException(status_code=403, detail="API key missing")
+
+    db = get_db()
+    users_collection = db["api_users"]
+    user_data = users_collection.find_one({"api_key": api_key_header})
+
+    if user_data is None:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    if not user_data.get("is_active", False):
+        raise HTTPException(status_code=403, detail="API key is inactive")
+
+    return api_key_header
+
+
+def get_superuser_api_key(api_key_header: str = Security(api_key_header)):
+    if api_key_header is None:
+        raise HTTPException(status_code=403, detail="API key missing")
+
+    db = get_db()
+    users_collection = db["api_users"]
+    user_data = users_collection.find_one({"api_key": api_key_header})
+
+    if user_data is None:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    if not user_data.get("is_active", False):
+        raise HTTPException(status_code=403, detail="API key is inactive")
+
+    if not user_data.get("is_superuser", False):
+        raise HTTPException(status_code=403, detail="Superuser access required")
+
+    return api_key_header
+
 
 class ChatRequest(BaseModel):
     model: str = "llama3.1"
@@ -28,6 +60,34 @@ class ChatRequest(BaseModel):
 @app.get("/")
 async def read_root(api_key: str = Depends(get_api_key)):
     return {"message": "server is running"}
+
+
+@app.post("/user/create")
+async def create_user(username: str, api_key: str = Depends(get_superuser_api_key)):
+    try:
+        return create_api_user(username=username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/user/me")
+async def me(api_key: str = Depends(get_api_key)):
+    return get_me(api_key=api_key)
+
+
+@app.post("/user/activate")
+async def activate_user(username: str, api_key: str = Depends(get_superuser_api_key)):
+    return {"success": activate_api_user(username)}
+
+
+@app.post("/user/deactivate")
+async def deactivate_user(username: str, api_key: str = Depends(get_superuser_api_key)):
+    return {"success": deactivate_api_user(username)}
+
+
+@app.get("/users")
+async def get_users(api_key: str = Depends(get_superuser_api_key)):
+    return get_all_api_users()
 
 
 @app.post("/generate")
