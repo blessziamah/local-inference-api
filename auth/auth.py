@@ -1,27 +1,30 @@
 import datetime
 import secrets
 from typing import Any
-
 from pydantic.v1 import BaseModel
-
+from bson import ObjectId
 from db import get_db
 
 
 class ApiUser(BaseModel):
+    id: str | None = None
     username: str
     api_key: str
     created_at: datetime.datetime
     is_active: bool
     last_active_at: datetime.datetime
-    is_superuser: bool
+    role: str  # "superuser" or "user"
 
-    def __init__(self, username: str, **data: Any):
-        data["api_key"] = f"bsg-ai-{secrets.token_urlsafe(48)}"
-        data["created_at"] = datetime.datetime.now()
-        data["is_active"] = True
-        data["last_active_at"] = datetime.datetime.now()
-        data["is_superuser"] = False
-        super().__init__(username=username, **data)
+    def __init__(self, username: str, role: str = "user", **data: Any):
+        if "api_key" not in data:
+            data["api_key"] = f"bsg-ai-{secrets.token_urlsafe(48)}"
+        if "created_at" not in data:
+            data["created_at"] = datetime.datetime.now()
+        if "is_active" not in data:
+            data["is_active"] = True
+        if "last_active_at" not in data:
+            data["last_active_at"] = datetime.datetime.now()
+        super().__init__(username=username, role=role, **data)
 
     def check_is_active(self) -> bool:
         """Check if the api key is active."""
@@ -35,38 +38,42 @@ class ApiUser(BaseModel):
         """Update the active status of the API key."""
         self.is_active = is_active
 
-    def set_superuser(self, is_superuser: bool) -> None:
-        """Set the superuser status of the API user."""
-        self.is_superuser = is_superuser
-
-    def check_superuser(self) -> bool:
+    def is_superuser(self) -> bool:
         """Check if the user is a superuser."""
-        return self.is_superuser
+        return self.role == "superuser"
 
     def to_dict(self) -> dict:
         """Convert the user to a dictionary."""
-        return {
+        result = {
             "username": self.username,
             "api_key": self.api_key,
             "created_at": self.created_at.isoformat(),
             "is_active": self.is_active,
             "last_active_at": self.last_active_at.isoformat(),
-            "is_superuser": self.is_superuser
+            "role": self.role
         }
+        if self.id:
+            result["id"] = self.id
+        return result
 
 
-def create_api_user(username: str) -> ApiUser:
+def create_api_user(username: str, role: str = "user") -> ApiUser:
     """Create a new API user with a unique API key."""
     db = get_db()
     users_collection = db["api_users"]
+
+    # Validate role
+    if role not in ["user", "superuser"]:
+        raise ValueError("Role must be either 'user' or 'superuser'")
 
     # Check if username already exists
     existing_user = users_collection.find_one({"username": username})
     if existing_user:
         raise ValueError(f"Username '{username}' already exists")
 
-    new_user = ApiUser(username=username)
-    users_collection.insert_one(new_user.to_dict())
+    new_user = ApiUser(username=username, role=role)
+    result = users_collection.insert_one(new_user.to_dict())
+    new_user.id = str(result.inserted_id)
 
     return new_user
 
@@ -78,6 +85,7 @@ def get_api_user(api_key: str) -> ApiUser | None:
     user_data = users_collection.find_one({"api_key": api_key})
 
     if user_data:
+        user_data["id"] = str(user_data.pop("_id"))
         return ApiUser(**user_data)
     return None
 
@@ -87,31 +95,56 @@ def get_me(api_key: str) -> ApiUser | None:
     return get_api_user(api_key)
 
 
-def deactivate_api_user(username: str) -> bool:
+def deactivate_api_user(user_id: str) -> bool:
     """Deactivate an API user by their API key."""
     db = get_db()
     users_collection = db["api_users"]
     result = users_collection.update_one(
-        {"username": username},
+        {"_id": ObjectId(user_id)},
         {"$set": {"is_active": False}}
     )
     return result.modified_count > 0
 
 
-def activate_api_user(username: str) -> bool:
+def activate_api_user(user_id: str) -> bool:
     """Activate an API user by their API key."""
     db = get_db()
     users_collection = db["api_users"]
     result = users_collection.update_one(
-        {"username": username},
+        {"_id": ObjectId(user_id)},
         {"$set": {"is_active": True}}
     )
     print(result)
     return result.modified_count > 0
+
 
 def get_all_api_users() -> list[ApiUser]:
     """Retrieve all API users."""
     db = get_db()
     users_collection = db["api_users"]
     users_data = users_collection.find()
-    return [ApiUser(**user) for user in users_data]
+    result = []
+    for user in users_data:
+        user["id"] = str(user.pop("_id"))
+        result.append(ApiUser(**user))
+    return result
+
+
+def delete_api_user(user_id: str) -> bool:
+    """Delete an API user by their username."""
+    db = get_db()
+    users_collection = db["api_users"]
+    result = users_collection.delete_one({"_id": ObjectId(user_id)})
+    return result.deleted_count > 0
+
+
+def get_user_by_id(user_id: str) -> ApiUser | None:
+    """Retrieve an API user by their ID."""
+    db = get_db()
+    users_collection = db["api_users"]
+    user_data = users_collection.find_one({"_id": ObjectId(user_id)})
+
+    if user_data:
+        user_data["id"] = str(user_data.pop("_id"))
+        return ApiUser(**user_data)
+    return None
