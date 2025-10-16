@@ -9,6 +9,9 @@ from llm.api import call_llm_api, chat_completion
 from db import get_db
 from auth.auth import create_api_user, get_me, deactivate_api_user, activate_api_user, get_all_api_users, \
     delete_api_user, get_user_by_id
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="BLACKSTAR-AI LLM API", version="1.0.0", root_path="/api/v1")
 
@@ -25,7 +28,7 @@ API_KEY_NAME = "x-api-key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 bearer_scheme = HTTPBearer(auto_error=False)
 
-REFRESH_TOKEN_URL = os.getenv("REFRESH_TOKEN_URL")
+REFRESH_TOKEN_URL = os.getenv("GNII_REFRESH_URL")
 
 
 async def verify_refresh_token(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)) -> dict:

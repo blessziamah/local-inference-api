@@ -3,9 +3,6 @@ import time
 import requests
 from typing import List, Dict
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 def parse_response(response_text: str) -> str:
