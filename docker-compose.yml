@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # FastAPI application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: local-inference-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=${MONGODB_URI:-mongodb://host.docker.internal:27017}
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME:-local_inference_api}
+      - LLM_URL=${LLM_URL:-http://host.docker.internal:11434}
+      - REFRESH_TOKEN_URL=${REFRESH_TOKEN_URL:-http://localhost:3000/api/auth/refresh}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
